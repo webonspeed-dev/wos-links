@@ -1,0 +1,313 @@
+// WOS Links Database Schema
+// Includes pgvector support for AI-powered features
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  emailVerified DateTime?
+  image         String?
+
+  // Subscription
+  plan          Plan      @default(FREE)
+  stripeCustomerId String?   @unique
+  stripeSubscriptionId String? @unique
+  subscriptionStatus String?
+  subscriptionEndsAt DateTime?
+
+  // Usage limits
+  linksCreated  Int       @default(0)
+  linksLimit    Int       @default(100)
+
+  // Relations
+  links         Link[]
+  domains       CustomDomain[]
+  apiKeys       ApiKey[]
+  workspaces    WorkspaceMember[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@map("users")
+}
+
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+// ============================================
+// LINKS (Core Feature)
+// ============================================
+
+model Link {
+  id            String    @id @default(cuid())
+  shortCode     String    @unique
+  domain        String    @default("wos.link") // Default or custom domain
+  destination   String    @db.Text
+
+  // Metadata (scraped from destination)
+  title         String?
+  description   String?
+  imageUrl      String?
+  favicon       String?
+
+  // AI-powered features
+  embedding     Unsupported("vector(1536)")? // OpenAI text-embedding-3-small
+  category      String?   // AI-categorized (product, blog, video, etc.)
+  aiSuggested   Boolean   @default(false) // Was shortCode AI-generated?
+
+  // SEO & Social
+  metaTitle     String?
+  metaDescription String?
+  ogImage       String?
+
+  // Settings
+  enabled       Boolean   @default(true)
+  password      String?   // Optional password protection
+  expiresAt     DateTime? // Link expiration
+
+  // UTM parameters (for attribution)
+  utmSource     String?
+  utmMedium     String?
+  utmCampaign   String?
+  utmTerm       String?
+  utmContent    String?
+
+  // Smart routing rules (stored as JSON)
+  routingRules  Json?     // Geo, device, time-based routing
+
+  // Relations
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  domainId      String?
+  customDomain  CustomDomain? @relation(fields: [domainId], references: [id])
+
+  clicks        Click[]
+  conversions   Conversion[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([domain, shortCode])
+  @@index([userId])
+  @@index([shortCode])
+  @@index([domain])
+  @@index([createdAt])
+  @@map("links")
+}
+
+// ============================================
+// CLICKS (Analytics)
+// ============================================
+
+model Click {
+  id            String    @id @default(cuid())
+
+  linkId        String
+  link          Link      @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  // Visitor info
+  ip            String?
+  country       String?
+  city          String?
+  region        String?
+  latitude      Float?
+  longitude     Float?
+
+  // Device info
+  device        String?   // mobile, desktop, tablet
+  browser       String?
+  os            String?
+
+  // Referrer info
+  referrer      String?   @db.Text
+  referrerDomain String?
+
+  // User agent
+  userAgent     String?   @db.Text
+
+  // Bot detection
+  isBot         Boolean   @default(false)
+  botName       String?
+
+  // Fingerprinting (for cross-device tracking)
+  fingerprint   String?
+  sessionId     String?
+
+  timestamp     DateTime  @default(now())
+
+  @@index([linkId])
+  @@index([timestamp])
+  @@index([country])
+  @@index([fingerprint])
+  @@index([sessionId])
+  @@map("clicks")
+}
+
+// ============================================
+// CONVERSIONS (Attribution)
+// ============================================
+
+model Conversion {
+  id            String    @id @default(cuid())
+
+  linkId        String
+  link          Link      @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  // Conversion details
+  type          ConversionType
+  value         Float?    // Revenue amount
+  currency      String?   @default("USD")
+
+  // Attribution
+  fingerprint   String?   // Match to click via fingerprint
+  sessionId     String?
+
+  // Multi-touch attribution
+  firstClick    String?   // First link clicked in journey
+  lastClick     String?   // Last link clicked before conversion
+
+  // Metadata
+  metadata      Json?     // Additional conversion data
+
+  timestamp     DateTime  @default(now())
+
+  @@index([linkId])
+  @@index([timestamp])
+  @@index([fingerprint])
+  @@index([sessionId])
+  @@map("conversions")
+}
+
+enum ConversionType {
+  PURCHASE
+  SIGNUP
+  FORM_SUBMIT
+  DOWNLOAD
+  CUSTOM
+}
+
+// ============================================
+// CUSTOM DOMAINS
+// ============================================
+
+model CustomDomain {
+  id            String    @id @default(cuid())
+  domain        String    @unique
+
+  // Verification
+  verified      Boolean   @default(false)
+  verificationToken String? @unique
+
+  // SSL
+  sslEnabled    Boolean   @default(false)
+
+  // Relations
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  links         Link[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([domain])
+  @@map("custom_domains")
+}
+
+// ============================================
+// API KEYS
+// ============================================
+
+model ApiKey {
+  id            String    @id @default(cuid())
+  name          String
+  key           String    @unique
+  keyPreview    String    // First 8 chars for display
+
+  // Permissions
+  scopes        String[]  // read, write, delete
+
+  // Usage
+  lastUsedAt    DateTime?
+  requestCount  Int       @default(0)
+  rateLimit     Int       @default(1000) // Requests per hour
+
+  // Relations
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime?
+
+  @@index([userId])
+  @@index([key])
+  @@map("api_keys")
+}
+
+// ============================================
+// WORKSPACES (Team Collaboration)
+// ============================================
+
+model Workspace {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+
+  // Settings
+  plan          Plan      @default(FREE)
+
+  // Relations
+  members       WorkspaceMember[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id            String    @id @default(cuid())
+  role          WorkspaceRole @default(MEMBER)
+
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  joinedAt      DateTime  @default(now())
+
+  @@unique([userId, workspaceId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("workspace_members")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}

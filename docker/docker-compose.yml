@@ -1,0 +1,46 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: wos-postgres
+    environment:
+      POSTGRES_USER: wos
+      POSTGRES_PASSWORD: wos_dev_password_change_in_production
+      POSTGRES_DB: wos_links
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - wos-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wos -d wos_links"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: wos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - wos-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    command: redis-server --appendonly yes
+
+networks:
+  wos-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

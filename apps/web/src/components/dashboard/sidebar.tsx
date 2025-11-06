@@ -11,6 +11,9 @@ import {
   Zap,
   Globe,
   Key,
+  Users,
+  CreditCard,
+  Plug,
 } from "lucide-react";
 
 const navigation = [
@@ -18,7 +21,10 @@ const navigation = [
   { name: "Links", href: "/dashboard/links", icon: Link2 },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Domains", href: "/dashboard/domains", icon: Globe },
+  { name: "Team", href: "/dashboard/team", icon: Users },
+  { name: "Integrations", href: "/dashboard/integrations", icon: Plug },
   { name: "API Keys", href: "/dashboard/api-keys", icon: Key },
+  { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 

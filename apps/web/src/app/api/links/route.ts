@@ -5,6 +5,7 @@
  *
  * Security features:
  * - Session-based authentication
+ * - Rate limiting (per-user, plan-based)
  * - Input validation with Zod
  * - URL safety checking
  * - User limit enforcement
@@ -28,6 +29,7 @@ import {
   isSafeUrl,
   normalizeUrl,
 } from "@/lib/link-helpers";
+import { rateLimit, createRateLimitResponse, addRateLimitHeaders } from "@/lib/rate-limit";
 
 /**
  * POST /api/links
@@ -35,7 +37,14 @@ import {
  */
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authenticate user
+    // 1. Rate limiting check
+    const rateLimitResult = await rateLimit(req);
+
+    if (!rateLimitResult.success) {
+      return createRateLimitResponse(rateLimitResult);
+    }
+
+    // 2. Authenticate user
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -45,7 +54,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Parse and validate request body
+    // 3. Parse and validate request body
     const body = await req.json();
 
     // Normalize destination URL
@@ -55,7 +64,7 @@ export async function POST(req: NextRequest) {
 
     const validated = createLinkSchema.parse(body);
 
-    // 3. Security: Check if URL is safe
+    // 4. Security: Check if URL is safe
     if (!isSafeUrl(validated.destination)) {
       return NextResponse.json(
         {
@@ -66,11 +75,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Create link with AI enhancements
+    // 5. Create link with AI enhancements
     const link = await createLink(session.user.id, validated);
 
-    // 5. Return success response
-    return NextResponse.json(
+    // 6. Return success response with rate limit headers
+    const response = NextResponse.json(
       {
         success: true,
         link: {
@@ -86,6 +95,8 @@ export async function POST(req: NextRequest) {
       },
       { status: 201 }
     );
+
+    return addRateLimitHeaders(response, rateLimitResult);
   } catch (error: any) {
     console.error("Error creating link:", error);
 
@@ -144,7 +155,14 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
   try {
-    // 1. Authenticate user
+    // 1. Rate limiting check
+    const rateLimitResult = await rateLimit(req);
+
+    if (!rateLimitResult.success) {
+      return createRateLimitResponse(rateLimitResult);
+    }
+
+    // 2. Authenticate user
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -154,24 +172,26 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 2. Parse query parameters
+    // 3. Parse query parameters
     const { searchParams } = new URL(req.url);
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
     const offset = Math.max(parseInt(searchParams.get("offset") || "0"), 0);
     const search = searchParams.get("search") || undefined;
 
-    // 3. Fetch user's links
+    // 4. Fetch user's links
     const result = await getUserLinks(session.user.id, {
       limit,
       offset,
       search,
     });
 
-    // 4. Return success response
-    return NextResponse.json({
+    // 5. Return success response with rate limit headers
+    const response = NextResponse.json({
       success: true,
       ...result,
     });
+
+    return addRateLimitHeaders(response, rateLimitResult);
   } catch (error: any) {
     console.error("Error fetching links:", error);
 
